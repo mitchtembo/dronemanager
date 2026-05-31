@@ -1,0 +1,51 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-bg-primary text-text-primary font-sans antialiased m-0 p-0;
+    background-image: radial-gradient(circle, #2D3748 1px, transparent 1px);
+    background-size: 24px 24px;
+    background-position: 0 0;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-heading tracking-wider;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-accent text-white px-4 py-2 rounded font-sans font-medium transition-colors hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-bg-primary;
+  }
+
+  .btn-secondary {
+    @apply border border-border text-text-primary px-4 py-2 rounded font-sans font-medium transition-colors hover:bg-bg-elevated focus:outline-none focus:ring-2 focus:ring-border focus:ring-offset-2 focus:ring-offset-bg-primary;
+  }
+
+  .input-field {
+    @apply w-full bg-bg-primary border border-border text-text-primary px-3 py-2 rounded font-sans focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent transition-colors;
+  }
+
+  .card {
+    @apply bg-bg-surface border border-border rounded-lg shadow-sm transition-all hover:shadow-[0_0_15px_rgba(59,130,246,0.15)] hover:border-accent/50;
+  }
+
+  .glassmorphism {
+    @apply bg-bg-elevated/85 backdrop-blur-md border border-border;
+  }
+
+  /* Hide scrollbar for Chrome, Safari and Opera */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Hide scrollbar for IE, Edge and Firefox */
+  .no-scrollbar {
+    -ms-overflow-style: none;  /* IE and Edge */
+    scrollbar-width: none;  /* Firefox */
+  }
+}
