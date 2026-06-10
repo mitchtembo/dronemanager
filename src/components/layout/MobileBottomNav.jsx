@@ -1,5 +1,5 @@
 import { useContext, useEffect, useMemo, useState } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   Bell,
   ClipboardList,
@@ -10,6 +10,7 @@ import {
   Send,
   Settings,
   Users,
+  LogOut,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { AuthContext } from '../../context/AuthContext';
@@ -27,8 +28,9 @@ const allItems = [
 ];
 
 const MobileBottomNav = () => {
-  const { user } = useContext(AuthContext);
+  const { user, logout } = useContext(AuthContext);
   const location = useLocation();
+  const navigate = useNavigate();
   const [isMoreOpen, setIsMoreOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
@@ -95,6 +97,18 @@ const MobileBottomNav = () => {
                 </NavLink>
               );
             })}
+
+            <button
+              onClick={() => {
+                setIsMoreOpen(false);
+                logout();
+                navigate('/login');
+              }}
+              className="flex items-center gap-2 rounded border border-border bg-bg-primary px-3 py-3 text-sm font-semibold text-text-secondary hover:text-status-danger transition-colors text-left"
+            >
+              <LogOut size={18} />
+              <span className="truncate">Sign Out</span>
+            </button>
           </div>
         </div>
       )}
