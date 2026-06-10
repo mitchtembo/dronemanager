@@ -5,6 +5,8 @@ import KPICard from '../components/ui/KPICard';
 import { supabase } from '../lib/supabase';
 import { AuthContext } from '../context/AuthContext';
 import { getFlightLogReview } from '../lib/flightLogReview';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const formatLogDate = (date) => {
   const parsedDate = new Date(date);
@@ -29,6 +31,56 @@ const FlightLogsPage = () => {
   });
   const { user, isLoading: authLoading } = useContext(AuthContext);
   const isPilot = user?.role === 'pilot';
+
+  const generatePDFReport = () => {
+    const doc = new jsPDF();
+
+    // Add Title
+    doc.setFontSize(20);
+    doc.text('Flight Logs Report', 14, 22);
+
+    // Add Summary Stats
+    doc.setFontSize(12);
+    doc.text(`Total Flights: ${stats.totalFlights}`, 14, 32);
+    doc.text(`Total Hours: ${stats.totalHours}`, 14, 38);
+    doc.text(`Incidents: ${stats.incidents}`, 14, 44);
+
+    // Prepare Table Data
+    const tableColumn = ["Date", "Pilot", "Mission", "Drone", "Duration (min)", "Status"];
+    const tableRows = [];
+
+    logs.forEach(log => {
+      const logDate = formatLogDate(log.log_date);
+      const pilotName = log.pilot?.full_name || 'Unknown Pilot';
+      const missionName = log.mission?.name || log.mission?.mission_identifier || 'Unlinked flight';
+      const droneModel = log.mission?.drone?.model || 'Unknown Drone';
+      const review = getFlightLogReview(log);
+
+      const logData = [
+        `${logDate.date} ${logDate.time}`,
+        pilotName,
+        missionName,
+        droneModel,
+        log.duration_minutes || 0,
+        review.label
+      ];
+      tableRows.push(logData);
+    });
+
+    // Add Table
+    autoTable(doc, {
+      head: [tableColumn],
+      body: tableRows,
+      startY: 50,
+      theme: 'grid',
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [41, 128, 185], textColor: 255 }
+    });
+
+    // Save the PDF
+    const dateStr = new Date().toISOString().split('T')[0];
+    doc.save(`flight_logs_report_${dateStr}.pdf`);
+  };
 
   const fetchLogs = async () => {
     setIsLoading(true);
@@ -117,7 +169,10 @@ const FlightLogsPage = () => {
           colorClass="text-status-danger"
           bgClass="bg-status-danger/10"
         />
-        <div className="card p-5 flex flex-col justify-center items-center text-center cursor-pointer hover:bg-bg-elevated/80 transition-colors group">
+        <div
+          onClick={generatePDFReport}
+          className="card p-5 flex flex-col justify-center items-center text-center cursor-pointer hover:bg-bg-elevated/80 transition-colors group"
+        >
           <BarChart2 className="text-accent mb-2 group-hover:scale-110 transition-transform" size={32} />
           <span className="font-sans text-xs font-semibold text-accent uppercase tracking-widest">Generate Report</span>
         </div>
