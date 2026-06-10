@@ -78,6 +78,44 @@ export const AuthProvider = ({ children }) => {
     await supabase.auth.signOut();
   };
 
+  useEffect(() => {
+    if (!user) return;
+
+    let timeoutId;
+
+    const resetTimer = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      // 15 minutes = 15 * 60 * 1000 = 900000 ms
+      timeoutId = setTimeout(() => {
+        logout();
+      }, 900000);
+    };
+
+    const events = ['mousemove', 'mousedown', 'keypress', 'touchstart', 'scroll'];
+
+    const handleActivity = () => {
+      resetTimer();
+    };
+
+    events.forEach(event => {
+      window.addEventListener(event, handleActivity);
+    });
+
+    // Initialize the timer
+    resetTimer();
+
+    return () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      events.forEach(event => {
+        window.removeEventListener(event, handleActivity);
+      });
+    };
+  }, [user]);
+
   return (
     <AuthContext.Provider value={{ user, login, logout, isLoading }}>
       {children}

@@ -1,5 +1,5 @@
-import { useContext, useEffect, useState } from 'react';
-import { Bell, Search, User } from 'lucide-react';
+import { useContext, useEffect, useState, useRef } from 'react';
+import { Bell, Search, User, LogOut } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabase';
@@ -7,10 +7,24 @@ import { supabase } from '../../lib/supabase';
 const TopBar = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user } = useContext(AuthContext);
+  const { user, logout } = useContext(AuthContext);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
   const [unreadCount, setUnreadCount] = useState(0);
   const pathName = location.pathname.split('/')[1] || 'dashboard';
   const pageTitle = pathName.charAt(0).toUpperCase() + pathName.slice(1).replace('-', ' ');
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -84,8 +98,28 @@ const TopBar = () => {
           )}
         </button>
 
-        <div className="w-8 h-8 rounded-full bg-bg-elevated border border-border hidden sm:flex items-center justify-center">
-          <User size={16} className="text-text-secondary" />
+        <div className="relative hidden sm:block" ref={dropdownRef}>
+          <button
+            onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+            className="w-8 h-8 rounded-full bg-bg-elevated border border-border flex items-center justify-center hover:bg-bg-surface transition-colors"
+          >
+            <User size={16} className="text-text-secondary" />
+          </button>
+
+          {isDropdownOpen && (
+            <div className="absolute right-0 mt-2 w-48 bg-bg-surface border border-border rounded shadow-lg z-50">
+              <button
+                onClick={() => {
+                  logout();
+                  navigate('/login');
+                }}
+                className="w-full flex items-center gap-2 px-4 py-2 text-sm text-text-secondary hover:text-status-danger hover:bg-bg-elevated transition-colors text-left"
+              >
+                <LogOut size={16} />
+                <span>Sign Out</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </header>
