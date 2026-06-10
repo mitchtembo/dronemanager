@@ -5,6 +5,9 @@ import KPICard from '../components/ui/KPICard';
 import { supabase } from '../lib/supabase';
 import { AuthContext } from '../context/AuthContext';
 import { getFlightLogReview } from '../lib/flightLogReview';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
+import toast from 'react-hot-toast';
 
 const formatLogDate = (date) => {
   const parsedDate = new Date(date);
@@ -65,6 +68,67 @@ const FlightLogsPage = () => {
     setIsLoading(false);
   };
 
+  const generatePDFReport = () => {
+    if (logs.length === 0) {
+      toast.error('No flight logs to generate a report for.');
+      return;
+    }
+
+    try {
+      const doc = new jsPDF();
+
+      // Title
+      doc.setFontSize(18);
+      doc.text('Flight Logs Report', 14, 22);
+
+      // Details
+      doc.setFontSize(11);
+      doc.setTextColor(100);
+      doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 30);
+      doc.text(`Total Flights: ${stats.totalFlights}`, 14, 36);
+      doc.text(`Total Hours: ${stats.totalHours}h`, 14, 42);
+
+      // Table columns
+      const tableColumn = ["Date", "Time", "Pilot", "Mission", "Duration (min)", "Incident"];
+
+      // Table rows
+      const tableRows = [];
+
+      logs.forEach(log => {
+        const logDate = formatLogDate(log.log_date);
+        const pilotName = log.pilot?.full_name || 'Unknown Pilot';
+        const missionName = log.mission?.name || log.mission?.mission_identifier || 'Unlinked flight';
+        const incidentReported = log.incident_reported ? 'Yes' : 'No';
+
+        const logData = [
+          logDate.date,
+          logDate.time,
+          pilotName,
+          missionName,
+          log.duration_minutes?.toString() || '0',
+          incidentReported
+        ];
+
+        tableRows.push(logData);
+      });
+
+      doc.autoTable({
+        head: [tableColumn],
+        body: tableRows,
+        startY: 50,
+        styles: { fontSize: 9 },
+        headStyles: { fillColor: [59, 130, 246] }, // Accent color approximation
+        alternateRowStyles: { fillColor: [245, 247, 250] }
+      });
+
+      doc.save('flight-logs-report.pdf');
+      toast.success('Report generated successfully!');
+    } catch (err) {
+      console.error('Failed to generate PDF:', err);
+      toast.error('Failed to generate report.');
+    }
+  };
+
   useEffect(() => {
     if (!authLoading) fetchLogs();
   }, [user, authLoading]);
@@ -117,7 +181,10 @@ const FlightLogsPage = () => {
           colorClass="text-status-danger"
           bgClass="bg-status-danger/10"
         />
-        <div className="card p-5 flex flex-col justify-center items-center text-center cursor-pointer hover:bg-bg-elevated/80 transition-colors group">
+        <div
+          className="card p-5 flex flex-col justify-center items-center text-center cursor-pointer hover:bg-bg-elevated/80 transition-colors group"
+          onClick={generatePDFReport}
+        >
           <BarChart2 className="text-accent mb-2 group-hover:scale-110 transition-transform" size={32} />
           <span className="font-sans text-xs font-semibold text-accent uppercase tracking-widest">Generate Report</span>
         </div>
