@@ -78,6 +78,22 @@ export const AuthProvider = ({ children }) => {
     await supabase.auth.signOut();
   };
 
+  const resetPassword = async (email) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin + '/reset-password',
+    });
+    if (error) throw error;
+    return { success: true };
+  };
+
+  const updatePassword = async (newPassword) => {
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword
+    });
+    if (error) throw error;
+    return { success: true };
+  };
+
   useEffect(() => {
     if (!user) return;
 
@@ -117,7 +133,7 @@ export const AuthProvider = ({ children }) => {
   }, [user]);
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, isLoading }}>
+    <AuthContext.Provider value={{ user, login, logout, isLoading, resetPassword, updatePassword }}>
       {children}
     </AuthContext.Provider>
   );
