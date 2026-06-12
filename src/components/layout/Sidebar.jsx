@@ -1,7 +1,7 @@
 import { useContext, useEffect, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../../context/AuthContext';
-import { LayoutDashboard, Users, Plane, ClipboardList, Send, FileBarChart, Bell, Settings, LogOut, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { LayoutDashboard, Users, Plane, ClipboardList, Send, FileBarChart, Bell, Settings, LogOut, PanelLeftClose, PanelLeftOpen, Activity } from 'lucide-react';
 import clsx from 'clsx';
 import { supabase } from '../../lib/supabase';
 
@@ -49,6 +49,7 @@ const Sidebar = ({ isCollapsed = false, onToggle }) => {
     { name: 'Reports', path: '/reports', icon: FileBarChart, roles: ['administrator', 'manager'] },
     { name: 'Notifications', path: '/notifications', icon: Bell, roles: ['administrator', 'manager', 'pilot'], badge: unreadCount },
     { name: 'User Management', path: '/users', icon: Settings, roles: ['administrator'] },
+    { name: 'Audit Logs', path: '/audit-logs', icon: Activity, roles: ['administrator'] },
   ];
 
   const handleLogout = () => {
