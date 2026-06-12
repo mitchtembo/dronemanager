@@ -17,6 +17,7 @@ import DroneDetailPage from './pages/DroneDetailPage';
 import NotificationsPage from './pages/NotificationsPage';
 import ReportsPage from './pages/ReportsPage';
 import UserManagementPage from './pages/UserManagementPage';
+import AuditLogsPage from './pages/AuditLogsPage';
 
 function App() {
   return (
@@ -41,6 +42,7 @@ function App() {
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/notifications" element={<NotificationsPage />} />
           <Route path="/users" element={<UserManagementPage />} />
+          <Route path="/audit-logs" element={<AuditLogsPage />} />
         </Route>
       </Route>
       
