@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { AlertCircle, CalendarCheck, CheckCircle2, Copy, IdCard, MapPin, RefreshCw, Save, ShieldCheck, UserRound, X } from 'lucide-react';
+import { AlertCircle, CalendarCheck, CheckCircle2, Copy, IdCard, MapPin, Save, ShieldCheck, UserRound, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabase';
 import { PILOT_READINESS_STATUSES } from '../../lib/pilotLifecycle';
@@ -304,12 +304,6 @@ const PilotFormPanel = ({ isOpen, onClose, pilot = null, onSave }) => {
     }
   };
 
-  const regeneratePassword = () => {
-    const generatedPassword = generateInitialPassword();
-    setValue('password', generatedPassword, { shouldDirty: true, shouldValidate: true });
-    setValue('confirmPassword', generatedPassword, { shouldDirty: true, shouldValidate: true });
-  };
-
   const copyCredentials = async () => {
     if (!createdCredentials) return;
 
@@ -363,6 +357,14 @@ const PilotFormPanel = ({ isOpen, onClose, pilot = null, onSave }) => {
 
         <div className="scrollbar-thin flex-1 overflow-y-auto p-6">
           <form id="pilot-form" onSubmit={handleSubmit(onSubmit)} className="space-y-8">
+            {!isEditing && (
+              <>
+                <input type="hidden" {...register('email')} />
+                <input type="hidden" {...register('password')} />
+                <input type="hidden" {...register('confirmPassword')} />
+              </>
+            )}
+
             <section className="space-y-4">
               <SectionTitle Icon={UserRound}>Identity</SectionTitle>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -371,11 +373,13 @@ const PilotFormPanel = ({ isOpen, onClose, pilot = null, onSave }) => {
                   <input {...register('fullName')} className={panelField} placeholder="e.g. John Doe" />
                   <ErrorText error={errors.fullName} />
                 </div>
-                <div>
-                  <label className="mb-1 block text-xs text-text-secondary">Email Address</label>
-                  <input type="email" {...register('email')} className={panelField} placeholder={`johndoe@${PILOT_EMAIL_DOMAIN}`} readOnly />
-                  <ErrorText error={errors.email} />
-                </div>
+                {isEditing && (
+                  <div>
+                    <label className="mb-1 block text-xs text-text-secondary">Email Address</label>
+                    <input type="email" {...register('email')} className={panelField} placeholder={`johndoe@${PILOT_EMAIL_DOMAIN}`} readOnly />
+                    <ErrorText error={errors.email} />
+                  </div>
+                )}
                 <div>
                   <label className="mb-1 block text-xs text-text-secondary">Contact Phone</label>
                   <input {...register('phone')} className={panelField} placeholder="+263 77 000 0000" />
@@ -490,34 +494,6 @@ const PilotFormPanel = ({ isOpen, onClose, pilot = null, onSave }) => {
                 </div>
               </div>
             </section>
-
-            {!isEditing && (
-              <section className="space-y-4">
-                <SectionTitle Icon={ShieldCheck}>Account Access</SectionTitle>
-                <p className="text-xs leading-relaxed text-text-muted">
-                  Login details are generated from the pilot name. The pilot must change this password after first sign in.
-                </p>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-xs text-text-secondary">Generated Password</label>
-                    <input type="text" {...register('password')} className={`${panelField} font-data`} readOnly />
-                    <ErrorText error={errors.password} />
-                  </div>
-                  <div className="flex flex-col justify-end">
-                    <input type="hidden" {...register('confirmPassword')} />
-                    <button
-                      type="button"
-                      onClick={regeneratePassword}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded border border-border px-3 text-sm font-semibold uppercase tracking-wide text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
-                    >
-                      <RefreshCw size={15} />
-                      Regenerate
-                    </button>
-                    <ErrorText error={errors.confirmPassword} />
-                  </div>
-                </div>
-              </section>
-            )}
           </form>
         </div>
 
