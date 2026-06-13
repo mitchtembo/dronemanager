@@ -10,7 +10,7 @@ const ResetPasswordPage = () => {
   const [status, setStatus] = useState({ type: '', message: '' });
   const [isLoading, setIsLoading] = useState(false);
   const [isShake, setIsShake] = useState(false);
-  const { updatePassword } = useContext(AuthContext);
+  const { updatePassword, user } = useContext(AuthContext);
   const navigate = useNavigate();
 
   const handleSubmit = async (e) => {
@@ -40,7 +40,7 @@ const ResetPasswordPage = () => {
       await updatePassword(password);
       setStatus({ type: 'success', message: 'Password updated successfully!' });
       setTimeout(() => {
-        navigate('/login');
+        navigate(user ? '/dashboard' : '/login');
       }, 2000);
     } catch (err) {
       setStatus({ type: 'error', message: err.message || 'Failed to update password. Please try again.' });
