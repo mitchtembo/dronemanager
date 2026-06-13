@@ -45,6 +45,7 @@ export const AuthProvider = ({ children }) => {
         email: authUser.email,
         fullName: data.full_name,
         role: data.role,
+        mustChangePassword: Boolean(data.must_change_password || authUser?.user_metadata?.must_change_password),
       });
     } catch (error) {
       console.error('Error fetching profile:', error);
@@ -56,6 +57,7 @@ export const AuthProvider = ({ children }) => {
           email: authUser.email,
           fullName: authUser?.user_metadata?.full_name || 'Unknown User',
           role: fallbackRole,
+          mustChangePassword: Boolean(authUser?.user_metadata?.must_change_password),
         });
       } else {
         setUser(null);
@@ -88,9 +90,26 @@ export const AuthProvider = ({ children }) => {
 
   const updatePassword = async (newPassword) => {
     const { error } = await supabase.auth.updateUser({
-      password: newPassword
+      password: newPassword,
+      data: { must_change_password: false },
     });
     if (error) throw error;
+
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const userId = authUser?.id || user?.id;
+
+    if (userId) {
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({ must_change_password: false })
+        .eq('id', userId);
+
+      if (profileError) {
+        console.warn('Unable to clear must_change_password on profile. Confirm the column exists in Supabase.', profileError);
+      }
+    }
+
+    setUser((currentUser) => currentUser ? { ...currentUser, mustChangePassword: false } : currentUser);
     return { success: true };
   };
 
