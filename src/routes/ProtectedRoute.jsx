@@ -1,9 +1,10 @@
 import { useContext } from 'react';
-import { Navigate, Outlet } from 'react-router-dom';
+import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 
 const ProtectedRoute = ({ roles }) => {
   const { user, isLoading } = useContext(AuthContext);
+  const location = useLocation();
 
   if (isLoading) {
     return <div className="h-screen w-screen flex items-center justify-center bg-bg-primary text-accent">Loading...</div>;
@@ -11,6 +12,10 @@ const ProtectedRoute = ({ roles }) => {
 
   if (!user) {
     return <Navigate to="/login" replace />;
+  }
+
+  if (user.mustChangePassword && location.pathname !== '/reset-password') {
+    return <Navigate to="/reset-password" replace />;
   }
 
   if (roles && !roles.includes(user.role)) {
