@@ -1,13 +1,14 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { AlertCircle, CalendarCheck, IdCard, MapPin, Save, ShieldCheck, UserRound, X } from 'lucide-react';
+import { AlertCircle, CalendarCheck, CheckCircle2, Copy, IdCard, MapPin, RefreshCw, Save, ShieldCheck, UserRound, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabase';
 import { PILOT_READINESS_STATUSES } from '../../lib/pilotLifecycle';
 
 const optionalText = z.string().optional().or(z.literal(''));
+const PILOT_EMAIL_DOMAIN = 'dronesolutions.co.zw';
 
 const pilotSchema = z.object({
   fullName: z.string().min(2, 'Full name must be at least 2 characters'),
@@ -89,18 +90,58 @@ const deriveReadiness = (status, readiness) => {
   return readiness || 'Ready';
 };
 
+const getPilotEmailFromName = (fullName) => {
+  const localPart = String(fullName || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim()
+    .split(/\s+/)
+    .join('')
+    .replace(/[^a-z0-9]/g, '');
+
+  return localPart ? `${localPart}@${PILOT_EMAIL_DOMAIN}` : '';
+};
+
+const generateInitialPassword = () => {
+  const uppercase = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lowercase = 'abcdefghijkmnopqrstuvwxyz';
+  const digits = '23456789';
+  const symbols = '!@#$%&*';
+  const allCharacters = uppercase + lowercase + digits + symbols;
+  const randomIndex = (length) => {
+    if (window.crypto?.getRandomValues) {
+      const values = new Uint32Array(1);
+      window.crypto.getRandomValues(values);
+      return values[0] % length;
+    }
+    return Math.floor(Math.random() * length);
+  };
+  const required = [uppercase, lowercase, digits, symbols].map((set) => set[randomIndex(set.length)]);
+
+  const remaining = Array.from({ length: 8 }, () => allCharacters[randomIndex(allCharacters.length)]);
+  return [...required, ...remaining].sort(() => randomIndex(3) - 1).join('');
+};
+
 const PilotFormPanel = ({ isOpen, onClose, pilot = null, onSave }) => {
   const isEditing = !!pilot;
+  const [createdCredentials, setCreatedCredentials] = useState(null);
+  const [copyState, setCopyState] = useState('');
 
   const {
     register,
     handleSubmit,
     reset,
+    setValue,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm({
     resolver: zodResolver(pilotSchema),
     defaultValues: emptyDefaults,
   });
+
+  const watchedFullName = watch('fullName');
 
   useEffect(() => {
     if (pilot) {
@@ -129,9 +170,21 @@ const PilotFormPanel = ({ isOpen, onClose, pilot = null, onSave }) => {
         confirmPassword: '',
       });
     } else {
-      reset(emptyDefaults);
+      const generatedPassword = generateInitialPassword();
+      reset({
+        ...emptyDefaults,
+        password: generatedPassword,
+        confirmPassword: generatedPassword,
+      });
     }
+    setCopyState('');
   }, [pilot, isOpen, reset]);
+
+  useEffect(() => {
+    if (isEditing) return;
+    const generatedEmail = getPilotEmailFromName(watchedFullName);
+    setValue('email', generatedEmail, { shouldDirty: true, shouldValidate: !!generatedEmail });
+  }, [isEditing, setValue, watchedFullName]);
 
   const buildProfilePayload = (data) => ({
     full_name: data.fullName.trim(),
@@ -157,19 +210,36 @@ const PilotFormPanel = ({ isOpen, onClose, pilot = null, onSave }) => {
     last_grounded_reason: toNullable(data.lastGroundedReason),
   });
 
+  const markInitialPasswordRequired = async (pilotId) => {
+    if (!pilotId) return;
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ must_change_password: true })
+      .eq('id', pilotId);
+
+    if (error) {
+      console.warn('Unable to set must_change_password on profile. Confirm the column exists in Supabase.', error);
+    }
+  };
+
   const onSubmit = async (data) => {
     try {
-      if (!isEditing && !data.email) {
-        toast.error('Email address is required for new pilot access.');
+      const generatedEmail = getPilotEmailFromName(data.fullName);
+      const generatedPassword = data.password || generateInitialPassword();
+      const submission = {
+        ...data,
+        email: isEditing ? data.email : generatedEmail,
+        password: generatedPassword,
+        confirmPassword: generatedPassword,
+      };
+
+      if (!isEditing && !submission.email) {
+        toast.error('Enter the pilot full name to generate their email address.');
         return;
       }
 
-      if (!isEditing && !data.password) {
-        toast.error('Password is required for new pilot access.');
-        return;
-      }
-
-      const payload = buildProfilePayload(data);
+      const payload = buildProfilePayload(submission);
 
       if (isEditing) {
         const { error } = await supabase
@@ -182,14 +252,15 @@ const PilotFormPanel = ({ isOpen, onClose, pilot = null, onSave }) => {
           'create_verified_pilot',
           {
             body: {
-              email: data.email,
-              password: data.password,
-              fullName: data.fullName,
-              licenceNo: data.licenceNo,
-              category: data.category,
-              licenceExpiry: data.licenceExpiry,
-              medicalExpiry: data.medicalExpiry,
-              status: data.status,
+              email: submission.email,
+              password: submission.password,
+              fullName: submission.fullName,
+              licenceNo: submission.licenceNo,
+              category: submission.category,
+              licenceExpiry: submission.licenceExpiry,
+              medicalExpiry: submission.medicalExpiry,
+              status: submission.status,
+              mustChangePassword: true,
             },
           }
         );
@@ -203,15 +274,64 @@ const PilotFormPanel = ({ isOpen, onClose, pilot = null, onSave }) => {
 
         const { error: enrichError } = await updateQuery;
         if (enrichError) throw enrichError;
+
+        if (createdPilotId) {
+          await markInitialPasswordRequired(createdPilotId);
+        } else {
+          const { data: createdProfile } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('email', submission.email)
+            .maybeSingle();
+          await markInitialPasswordRequired(createdProfile?.id);
+        }
+
+        setCreatedCredentials({
+          fullName: submission.fullName.trim(),
+          email: submission.email,
+          password: submission.password,
+        });
       }
 
-      if (onSave) onSave(data);
+      if (onSave) onSave(submission);
       toast.success(isEditing ? 'Pilot updated successfully' : 'Pilot added and verified');
-      onClose();
+      if (isEditing) {
+        onClose();
+      }
     } catch (error) {
       console.error(error);
       toast.error(error.message || 'An error occurred while saving');
     }
+  };
+
+  const regeneratePassword = () => {
+    const generatedPassword = generateInitialPassword();
+    setValue('password', generatedPassword, { shouldDirty: true, shouldValidate: true });
+    setValue('confirmPassword', generatedPassword, { shouldDirty: true, shouldValidate: true });
+  };
+
+  const copyCredentials = async () => {
+    if (!createdCredentials) return;
+
+    const text = [
+      `Pilot: ${createdCredentials.fullName}`,
+      `Email: ${createdCredentials.email}`,
+      `Temporary password: ${createdCredentials.password}`,
+    ].join('\n');
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyState('Copied');
+      setTimeout(() => setCopyState(''), 1800);
+    } catch (error) {
+      console.error(error);
+      toast.error('Unable to copy details. Select and copy them manually.');
+    }
+  };
+
+  const closeSuccessModal = () => {
+    setCreatedCredentials(null);
+    onClose();
   };
 
   return (
@@ -253,7 +373,7 @@ const PilotFormPanel = ({ isOpen, onClose, pilot = null, onSave }) => {
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-text-secondary">Email Address</label>
-                  <input type="email" {...register('email')} className={panelField} placeholder="pilot@dronesol.co.zw" disabled={isEditing} />
+                  <input type="email" {...register('email')} className={panelField} placeholder={`johndoe@${PILOT_EMAIL_DOMAIN}`} readOnly />
                   <ErrorText error={errors.email} />
                 </div>
                 <div>
@@ -374,15 +494,25 @@ const PilotFormPanel = ({ isOpen, onClose, pilot = null, onSave }) => {
             {!isEditing && (
               <section className="space-y-4">
                 <SectionTitle Icon={ShieldCheck}>Account Access</SectionTitle>
+                <p className="text-xs leading-relaxed text-text-muted">
+                  Login details are generated from the pilot name. The pilot must change this password after first sign in.
+                </p>
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <div>
-                    <label className="mb-1 block text-xs text-text-secondary">Password</label>
-                    <input type="password" {...register('password')} className={panelField} placeholder="********" />
+                    <label className="mb-1 block text-xs text-text-secondary">Generated Password</label>
+                    <input type="text" {...register('password')} className={`${panelField} font-data`} readOnly />
                     <ErrorText error={errors.password} />
                   </div>
-                  <div>
-                    <label className="mb-1 block text-xs text-text-secondary">Confirm Password</label>
-                    <input type="password" {...register('confirmPassword')} className={panelField} placeholder="********" />
+                  <div className="flex flex-col justify-end">
+                    <input type="hidden" {...register('confirmPassword')} />
+                    <button
+                      type="button"
+                      onClick={regeneratePassword}
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded border border-border px-3 text-sm font-semibold uppercase tracking-wide text-text-secondary transition-colors hover:bg-bg-elevated hover:text-text-primary"
+                    >
+                      <RefreshCw size={15} />
+                      Regenerate
+                    </button>
                     <ErrorText error={errors.confirmPassword} />
                   </div>
                 </div>
@@ -410,10 +540,59 @@ const PilotFormPanel = ({ isOpen, onClose, pilot = null, onSave }) => {
             ) : (
               <Save size={16} />
             )}
-            {isEditing ? 'Save Changes' : 'Register Pilot'}
+          {isEditing ? 'Save Changes' : 'Register Pilot'}
           </button>
         </div>
       </div>
+
+      {createdCredentials && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-bg-primary/80 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded border border-border bg-bg-elevated p-6 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded bg-status-success/10 text-status-success">
+                <CheckCircle2 size={22} />
+              </div>
+              <div>
+                <h3 className="font-heading text-xl font-bold uppercase tracking-wide text-text-primary">Pilot Created</h3>
+                <p className="mt-1 text-sm text-text-muted">Copy these login details before closing this window.</p>
+              </div>
+            </div>
+
+            <div className="mt-5 space-y-3 rounded border border-border bg-bg-primary p-4">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-text-muted">Pilot</div>
+                <div className="mt-1 text-sm font-semibold text-text-primary">{createdCredentials.fullName}</div>
+              </div>
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-text-muted">Email</div>
+                <div className="mt-1 break-all font-data text-sm text-text-primary">{createdCredentials.email}</div>
+              </div>
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-text-muted">Temporary Password</div>
+                <div className="mt-1 break-all font-data text-sm text-text-primary">{createdCredentials.password}</div>
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={copyCredentials}
+                className="inline-flex items-center justify-center gap-2 rounded border border-accent/40 px-4 py-2 text-sm font-semibold uppercase tracking-wide text-accent transition-colors hover:bg-accent/10"
+              >
+                <Copy size={16} />
+                {copyState || 'Copy Details'}
+              </button>
+              <button
+                type="button"
+                onClick={closeSuccessModal}
+                className="rounded bg-accent px-4 py-2 text-sm font-semibold uppercase tracking-wide text-white transition-colors hover:bg-accent/90"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };
