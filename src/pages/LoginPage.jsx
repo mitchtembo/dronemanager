@@ -15,7 +15,7 @@ const LoginPage = () => {
 
   useEffect(() => {
     if (user) {
-      navigate('/dashboard');
+      navigate(user.mustChangePassword ? '/reset-password' : '/dashboard');
     }
   }, [user, navigate]);
 
