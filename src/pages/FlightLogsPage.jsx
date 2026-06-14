@@ -2,6 +2,7 @@ import { useState, useEffect, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, PlaneTakeoff, Clock, AlertTriangle, BarChart2, Eye, Loader2, List } from 'lucide-react';
 import KPICard from '../components/ui/KPICard';
+import PaginationControls from '../components/ui/PaginationControls';
 import { supabase } from '../lib/supabase';
 import { AuthContext } from '../context/AuthContext';
 import { getFlightLogReview } from '../lib/flightLogReview';
@@ -20,6 +21,8 @@ const formatLogDate = (date) => {
   };
 };
 
+const PAGE_SIZE_DEFAULT = 25;
+
 const FlightLogsPage = () => {
   const navigate = useNavigate();
   const [logs, setLogs] = useState([]);
@@ -29,6 +32,9 @@ const FlightLogsPage = () => {
     totalHours: 0,
     incidents: 0
   });
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT);
+  const [totalCount, setTotalCount] = useState(0);
   const { user, isLoading: authLoading } = useContext(AuthContext);
   const isPilot = user?.role === 'pilot';
 
@@ -84,34 +90,51 @@ const FlightLogsPage = () => {
 
   const fetchLogs = async () => {
     setIsLoading(true);
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
     let query = supabase
       .from('flight_logs')
       .select(`
         *,
         pilot:pilot_id(full_name),
         mission:mission_id(name, mission_identifier, type, location, status, drone:drone_id(model, serial_number))
-      `)
-      .order('log_date', { ascending: false });
+      `, { count: 'exact' })
+      .order('log_date', { ascending: false })
+      .range(from, to);
 
     if (isPilot) {
       query = query.eq('pilot_id', user.id);
     }
 
-    const { data, error } = await query;
+    const statsRequests = [
+      supabase.from('flight_logs').select('id', { count: 'exact', head: true }),
+      supabase.from('flight_logs').select('id', { count: 'exact', head: true }).eq('incident_reported', true),
+      supabase.from('flight_logs').select('duration_minutes'),
+    ];
+
+    if (isPilot) {
+      statsRequests[0] = statsRequests[0].eq('pilot_id', user.id);
+      statsRequests[1] = statsRequests[1].eq('pilot_id', user.id);
+      statsRequests[2] = statsRequests[2].eq('pilot_id', user.id);
+    }
+
+    const [{ data, error, count }, totalResponse, incidentResponse, durationResponse] = await Promise.all([
+      query,
+      ...statsRequests,
+    ]);
 
     if (error) {
       console.error('Error fetching logs:', error);
     } else {
       setLogs(data || []);
+      setTotalCount(count || 0);
 
-      const totalFlights = data?.length || 0;
-      const totalMinutes = data?.reduce((acc, log) => acc + (log.duration_minutes || 0), 0) || 0;
-      const incidents = data?.filter(log => log.incident_reported)?.length || 0;
+      const totalMinutes = durationResponse.data?.reduce((acc, log) => acc + (log.duration_minutes || 0), 0) || 0;
 
       setStats({
-        totalFlights,
+        totalFlights: totalResponse.count || 0,
         totalHours: Math.round(totalMinutes / 60),
-        incidents
+        incidents: incidentResponse.count || 0
       });
     }
     setIsLoading(false);
@@ -119,7 +142,7 @@ const FlightLogsPage = () => {
 
   useEffect(() => {
     if (!authLoading) fetchLogs();
-  }, [user, authLoading]);
+  }, [user, authLoading, page, pageSize]);
 
   return (
     <div className="space-y-6 min-w-0 pb-6">
@@ -191,104 +214,94 @@ const FlightLogsPage = () => {
               <p>No flight logs found.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 p-4">
-              {logs.map((log) => {
-                const logDate = formatLogDate(log.log_date);
-                const pilotName = log.pilot?.full_name || 'Unknown Pilot';
-                const pilotInitials = pilotName.substring(0, 2).toUpperCase();
-                const incidentDetails = log.incident_details || 'Incident Reported';
-                const review = getFlightLogReview(log);
-                const missionName = log.mission?.name || log.mission?.mission_identifier || 'Unlinked flight';
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[960px] table-fixed text-left text-sm">
+                <thead className="border-b border-border bg-bg-elevated/50 text-xs uppercase tracking-wide text-text-muted">
+                  <tr>
+                    <th className="w-[11%] px-4 py-3 font-semibold">Date</th>
+                    <th className="w-[14%] px-4 py-3 font-semibold">Pilot</th>
+                    <th className="w-[16%] px-4 py-3 font-semibold">Mission</th>
+                    <th className="w-[13%] px-4 py-3 font-semibold">Drone</th>
+                    <th className="w-[11%] px-4 py-3 font-semibold">Type</th>
+                    <th className="w-[8%] px-4 py-3 font-semibold">Duration</th>
+                    <th className="w-[10%] px-4 py-3 font-semibold">Review</th>
+                    <th className="w-[10%] px-4 py-3 font-semibold">Incident</th>
+                    <th className="w-[7%] px-4 py-3 text-right font-semibold">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/50">
+                  {logs.map((log, index) => {
+                    const logDate = formatLogDate(log.log_date);
+                    const pilotName = log.pilot?.full_name || 'Unknown Pilot';
+                    const incidentDetails = log.incident_details || 'Incident Reported';
+                    const review = getFlightLogReview(log);
+                    const missionName = log.mission?.name || log.mission?.mission_identifier || 'Unlinked flight';
 
-                return (
-                  <article
-                    key={log.id}
-                    className={`min-w-0 rounded border border-border bg-bg-primary/40 p-4 transition-colors hover:border-accent/40 hover:bg-bg-elevated/20 ${
-                      log.incident_reported ? 'border-l-2 border-l-status-danger' : ''
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex min-w-0 items-center gap-3">
-                        <div className="w-9 h-9 shrink-0 rounded bg-bg-elevated border border-border flex items-center justify-center font-sans font-bold text-[10px] text-text-secondary">
-                          {pilotInitials}
-                        </div>
-                        <div className="min-w-0">
-                          <h3 className="font-semibold text-text-primary truncate">{pilotName}</h3>
-                          <div className="font-data text-xs text-text-muted">
-                            {logDate.date}{logDate.time ? ` - ${logDate.time}` : ''}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="shrink-0 flex flex-col items-end gap-2">
-                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
-                          review.status === 'approved'
-                            ? 'bg-status-success/10 text-status-success border-status-success/20'
-                            : review.status === 'declined'
-                              ? 'bg-status-danger/10 text-status-danger border-status-danger/20'
-                              : 'bg-status-warning/10 text-status-warning border-status-warning/20'
-                        }`}>
-                          {review.label}
-                        </span>
-                        <button
-                          onClick={() => navigate(`/flight-logs/${log.id}`)}
-                          className="inline-flex items-center gap-1.5 rounded border border-accent/30 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-accent hover:bg-accent/10 transition-colors"
-                        >
-                          <Eye size={15} />
-                          View
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                      <div className="min-w-0 sm:col-span-2">
-                        <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Mission</div>
-                        <div className="mt-1 text-text-primary break-words">{missionName}</div>
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Drone</div>
-                        <div className="mt-1 text-text-primary font-data break-words">{log.mission?.drone?.model || 'Unknown Drone'}</div>
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Mission Type</div>
-                        <div className="mt-1 text-text-primary break-words">{log.mission?.type || log.mission_type || 'Unspecified'}</div>
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Duration</div>
-                        <div className="mt-1 font-data text-text-secondary">{log.duration_minutes ?? 0} min</div>
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Location</div>
-                        <div className="mt-1 text-text-secondary break-words">{log.mission?.location || log.departure_location || '-'}</div>
-                      </div>
-                      <div className="min-w-0 sm:col-span-2">
-                        <div className="text-[10px] uppercase tracking-wider text-text-muted font-semibold">Incidents</div>
-                        <div className="mt-1">
+                    return (
+                      <tr key={log.id} className={`transition-colors hover:bg-bg-elevated/40 ${index % 2 !== 0 ? 'bg-bg-elevated/10' : ''}`}>
+                        <td className="px-4 py-4">
+                          <div className="font-data text-text-primary">{logDate.date}</div>
+                          <div className="font-data text-xs text-text-muted">{logDate.time}</div>
+                        </td>
+                        <td className="truncate px-4 py-4 font-semibold text-text-primary">{pilotName}</td>
+                        <td className="truncate px-4 py-4 text-text-primary">{missionName}</td>
+                        <td className="truncate px-4 py-4 font-data text-text-secondary">{log.mission?.drone?.model || 'Unknown Drone'}</td>
+                        <td className="truncate px-4 py-4 text-text-secondary">{log.mission?.type || log.mission_type || 'Unspecified'}</td>
+                        <td className="whitespace-nowrap px-4 py-4 font-data text-accent">{log.duration_minutes ?? 0} min</td>
+                        <td className="px-4 py-4">
+                          <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+                            review.status === 'approved'
+                              ? 'border-status-success/20 bg-status-success/10 text-status-success'
+                              : review.status === 'declined'
+                                ? 'border-status-danger/20 bg-status-danger/10 text-status-danger'
+                                : 'border-status-warning/20 bg-status-warning/10 text-status-warning'
+                          }`}>
+                            {review.label}
+                          </span>
+                        </td>
+                        <td className="px-4 py-4">
                           {!log.incident_reported ? (
-                            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-status-success/10 text-status-success font-sans text-[10px] uppercase font-bold border border-status-success/20">
-                              <span className="w-1.5 h-1.5 rounded-full bg-status-success"></span>
+                            <span className="inline-flex rounded-full border border-status-success/20 bg-status-success/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-status-success">
                               None
                             </span>
                           ) : (
-                            <span className="inline-flex items-start gap-1.5 px-2 py-1 rounded bg-status-danger/10 text-status-danger font-sans text-[10px] uppercase font-bold border border-status-danger/20">
-                              <span className="w-1.5 h-1.5 mt-1 shrink-0 rounded-full bg-status-danger"></span>
-                              <span className="normal-case tracking-normal leading-relaxed break-words">{incidentDetails}</span>
-                            </span>
+                            <span className="block truncate text-xs text-status-danger" title={incidentDetails}>{incidentDetails}</span>
                           )}
-                        </div>
-                      </div>
-                    </div>
-                  </article>
-                );
-              })}
+                        </td>
+                        <td className="px-4 py-4">
+                          <div className="flex justify-end">
+                            <button
+                              onClick={() => navigate(`/flight-logs/${log.id}`)}
+                              className="inline-flex h-8 w-8 items-center justify-center rounded border border-accent/30 text-accent transition-colors hover:bg-accent/10"
+                              title="View flight log"
+                              aria-label={`View flight log for ${missionName}`}
+                            >
+                              <Eye size={15} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
 
-        <div className="p-3 border-t border-border bg-bg-elevated/50 flex items-center justify-between text-text-muted text-xs font-semibold">
-          <div>
-            Showing <span className="font-data text-text-primary">{logs.length}</span> logs
-          </div>
-        </div>
+        {!isLoading && (
+          <PaginationControls
+            page={page}
+            pageSize={pageSize}
+            totalCount={totalCount}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(1);
+            }}
+            itemLabel="logs"
+          />
+        )}
       </div>
     </div>
   );
