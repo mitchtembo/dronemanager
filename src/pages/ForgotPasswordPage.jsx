@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import { Mail, Loader2, AlertCircle, CheckCircle } from 'lucide-react';
 import clsx from 'clsx';
+import { cleanEmail } from '../lib/inputSanitizers';
 
 const ForgotPasswordPage = () => {
   const [email, setEmail] = useState('');
@@ -14,8 +15,9 @@ const ForgotPasswordPage = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setStatus({ type: '', message: '' });
+    const normalizedEmail = cleanEmail(email);
 
-    if (!email) {
+    if (!normalizedEmail) {
       setStatus({ type: 'error', message: 'Please enter your email address' });
       triggerShake();
       return;
@@ -23,7 +25,7 @@ const ForgotPasswordPage = () => {
 
     setIsLoading(true);
     try {
-      await resetPassword(email);
+      await resetPassword(normalizedEmail);
       setStatus({ type: 'success', message: 'Password reset link sent! Check your email.' });
     } catch (err) {
       setStatus({ type: 'error', message: err.message || 'Failed to send reset link. Please try again.' });
