@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabase';
-import { parseNumber } from '../../lib/droneLifecycle';
+import { cleanEnum, cleanText, finiteNumber, nullableMultilineText, nullableText } from '../../lib/inputSanitizers';
 
 const steps = [
   { id: 'identity', label: 'Identity', Icon: PlaneTakeoff },
@@ -43,6 +43,9 @@ const defaultForm = {
   warrantyExpiry: '',
   maintenanceNotes: '',
 };
+
+const DRONE_TYPES = ['Multirotor', 'Fixed Wing', 'VTOL', 'Payload Carrier', 'Other'];
+const DRONE_STATUSES = ['Operational', 'Maintenance', 'Grounded', 'Decommissioned'];
 
 const inputClass = 'w-full bg-bg-primary border border-border rounded px-3 py-2 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-accent';
 
@@ -133,14 +136,23 @@ const DroneFormModal = ({ isOpen, onClose, drone = null, onSave }) => {
 
   const validate = () => {
     const nextErrors = {};
+    const interval = finiteNumber(form.maintenanceIntervalHours, 0);
+    const payloadCapacity = finiteNumber(form.payloadCapacityKg);
+    const maxFlightTime = finiteNumber(form.maxFlightTimeMinutes);
 
-    if (!form.registrationNumber.trim()) nextErrors.registrationNumber = 'Registration number is required.';
-    if (!form.manufacturer.trim()) nextErrors.manufacturer = 'Manufacturer is required.';
-    if (!form.model.trim()) nextErrors.model = 'Model is required.';
-    if (!form.serialNumber.trim()) nextErrors.serialNumber = 'Serial number is required.';
+    if (!cleanText(form.registrationNumber, { max: 80 })) nextErrors.registrationNumber = 'Registration number is required.';
+    if (!cleanText(form.manufacturer, { max: 80 })) nextErrors.manufacturer = 'Manufacturer is required.';
+    if (!cleanText(form.model, { max: 120 })) nextErrors.model = 'Model is required.';
+    if (!cleanText(form.serialNumber, { max: 120 })) nextErrors.serialNumber = 'Serial number is required.';
     if (!form.purchaseDate) nextErrors.purchaseDate = 'Purchase date is required.';
-    if (!form.maintenanceIntervalHours || parseNumber(form.maintenanceIntervalHours, 0) <= 0) {
+    if (!interval || interval <= 0 || interval > 10000) {
       nextErrors.maintenanceIntervalHours = 'Enter a positive service interval.';
+    }
+    if (payloadCapacity !== null && (payloadCapacity < 0 || payloadCapacity > 10000)) {
+      nextErrors.payloadCapacityKg = 'Enter a valid payload capacity.';
+    }
+    if (maxFlightTime !== null && (maxFlightTime < 0 || maxFlightTime > 10000)) {
+      nextErrors.maxFlightTimeMinutes = 'Enter a valid flight time.';
     }
 
     setErrors(nextErrors);
@@ -149,34 +161,33 @@ const DroneFormModal = ({ isOpen, onClose, drone = null, onSave }) => {
 
   const handleSubmit = async () => {
     if (!validate()) {
-      const firstError = ['registrationNumber', 'manufacturer', 'model', 'serialNumber', 'purchaseDate'].find((key) => errors[key]);
-      if (firstError) setActiveStep(firstError === 'purchaseDate' ? 0 : 0);
+      setActiveStep(0);
       return;
     }
 
     setIsSubmitting(true);
 
     const payload = {
-      registration_number: form.registrationNumber.trim(),
-      manufacturer: form.manufacturer.trim(),
-      model: `${form.manufacturer.trim()} ${form.model.trim()}`.trim(),
-      drone_type: form.droneType,
-      serial_number: form.serialNumber.trim(),
+      registration_number: cleanText(form.registrationNumber, { max: 80 }),
+      manufacturer: cleanText(form.manufacturer, { max: 80 }),
+      model: `${cleanText(form.manufacturer, { max: 80 })} ${cleanText(form.model, { max: 120 })}`.trim(),
+      drone_type: cleanEnum(form.droneType, DRONE_TYPES, 'Other'),
+      serial_number: cleanText(form.serialNumber, { max: 120 }),
       purchase_date: form.purchaseDate || null,
-      home_base: form.homeBase.trim() || null,
-      insurance_policy: form.insurancePolicy.trim() || null,
+      home_base: nullableText(form.homeBase, { max: 160 }),
+      insurance_policy: nullableText(form.insurancePolicy, { max: 120 }),
       insurance_expiry: form.insuranceExpiry || null,
-      certification_reference: form.certificationReference.trim() || null,
-      payload_capacity_kg: parseNumber(form.payloadCapacityKg),
-      max_flight_time_minutes: parseNumber(form.maxFlightTimeMinutes),
-      battery_type: form.batteryType.trim() || null,
-      firmware_version: form.firmwareVersion.trim() || null,
-      status: form.status,
+      certification_reference: nullableText(form.certificationReference, { max: 160 }),
+      payload_capacity_kg: finiteNumber(form.payloadCapacityKg),
+      max_flight_time_minutes: finiteNumber(form.maxFlightTimeMinutes),
+      battery_type: nullableText(form.batteryType, { max: 120 }),
+      firmware_version: nullableText(form.firmwareVersion, { max: 80 }),
+      status: cleanEnum(form.status, DRONE_STATUSES, 'Operational'),
       readiness_status: safeReadiness,
       next_maintenance_date: form.nextMaintenanceDate || null,
-      maintenance_interval_hours: parseNumber(form.maintenanceIntervalHours, 25),
+      maintenance_interval_hours: finiteNumber(form.maintenanceIntervalHours, 25),
       warranty_expiry: form.warrantyExpiry || null,
-      maintenance_notes: form.maintenanceNotes.trim() || null,
+      maintenance_notes: nullableMultilineText(form.maintenanceNotes, { max: 2000 }),
     };
 
     const request = isEditing
