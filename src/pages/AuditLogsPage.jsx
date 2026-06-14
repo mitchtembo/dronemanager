@@ -1,19 +1,28 @@
 import { Download, Activity } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import PaginationControls from '../components/ui/PaginationControls';
+
+const PAGE_SIZE_DEFAULT = 25;
 
 const AuditLogsPage = () => {
   const [logs, setLogs] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT);
+  const [totalCount, setTotalCount] = useState(0);
 
   useEffect(() => {
     const fetchLogs = async () => {
       setIsLoading(true);
       try {
-        const { data, error } = await supabase
+        const from = (page - 1) * pageSize;
+        const to = from + pageSize - 1;
+        const { data, error, count } = await supabase
           .from('audit_logs')
-          .select('*, user:user_id(full_name, email)')
-          .order('created_at', { ascending: false });
+          .select('*, user:user_id(full_name, email)', { count: 'exact' })
+          .order('created_at', { ascending: false })
+          .range(from, to);
 
         if (error) {
           // Fallback if table doesn't exist or other error
@@ -26,6 +35,7 @@ const AuditLogsPage = () => {
           ]);
         } else {
           setLogs(data || []);
+          setTotalCount(count || 0);
         }
       } catch (error) {
         console.error("Error fetching audit logs", error);
@@ -39,7 +49,7 @@ const AuditLogsPage = () => {
     };
 
     fetchLogs();
-  }, []);
+  }, [page, pageSize]);
 
   return (
     <div className="space-y-6 flex flex-col flex-1 min-h-0 pb-10">
@@ -100,6 +110,20 @@ const AuditLogsPage = () => {
             </tbody>
           </table>
         </div>
+
+        {!isLoading && (
+          <PaginationControls
+            page={page}
+            pageSize={pageSize}
+            totalCount={totalCount}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
+              setPage(1);
+            }}
+            itemLabel="logs"
+          />
+        )}
       </div>
     </div>
   );
