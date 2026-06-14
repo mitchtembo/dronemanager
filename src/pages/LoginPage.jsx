@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import { Mail, Lock, Loader2, AlertCircle } from 'lucide-react';
 import clsx from 'clsx';
+import { cleanEmail } from '../lib/inputSanitizers';
 
 const LoginPage = () => {
   const [email, setEmail] = useState('');
@@ -22,8 +23,9 @@ const LoginPage = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    const normalizedEmail = cleanEmail(email);
     
-    if (!email || !password) {
+    if (!normalizedEmail || !password) {
       setError('Please fill in all fields');
       triggerShake();
       return;
@@ -31,7 +33,7 @@ const LoginPage = () => {
 
     setIsLoading(true);
     try {
-      await login(email, password);
+      await login(normalizedEmail, password);
       // Removed navigate('/dashboard') so that the app routes to dashboard
       // only when the user object actually becomes available.
     } catch (err) {
@@ -128,7 +130,7 @@ const LoginPage = () => {
                     "input-field pl-10 h-11",
                     error && !password && "border-status-danger ring-1 ring-status-danger"
                   )}
-                  placeholder="••••••••"
+                  placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                   disabled={isLoading}
                 />
               </div>
