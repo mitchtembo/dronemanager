@@ -13,6 +13,14 @@ const ResetPasswordPage = () => {
   const { updatePassword, user } = useContext(AuthContext);
   const navigate = useNavigate();
 
+  const isStrongPassword = (value) => (
+    value.length >= 8 &&
+    /[a-z]/.test(value) &&
+    /[A-Z]/.test(value) &&
+    /\d/.test(value) &&
+    /[^A-Za-z0-9]/.test(value)
+  );
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setStatus({ type: '', message: '' });
@@ -29,8 +37,8 @@ const ResetPasswordPage = () => {
       return;
     }
 
-    if (password.length < 6) {
-      setStatus({ type: 'error', message: 'Password must be at least 6 characters' });
+    if (!isStrongPassword(password)) {
+      setStatus({ type: 'error', message: 'Password must be at least 8 characters and include uppercase, lowercase, number, and symbol.' });
       triggerShake();
       return;
     }
@@ -123,7 +131,7 @@ const ResetPasswordPage = () => {
                     "input-field pl-10 h-11",
                     status.type === 'error' && !password && "border-status-danger ring-1 ring-status-danger"
                   )}
-                  placeholder="••••••••"
+                  placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                   disabled={isLoading || status.type === 'success'}
                 />
               </div>
@@ -141,7 +149,7 @@ const ResetPasswordPage = () => {
                     "input-field pl-10 h-11",
                     status.type === 'error' && !confirmPassword && "border-status-danger ring-1 ring-status-danger"
                   )}
-                  placeholder="••••••••"
+                  placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                   disabled={isLoading || status.type === 'success'}
                 />
               </div>
