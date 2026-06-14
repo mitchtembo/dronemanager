@@ -6,12 +6,13 @@ import { AlertCircle, CalendarCheck, CheckCircle2, Copy, IdCard, MapPin, Save, S
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabase';
 import { PILOT_READINESS_STATUSES } from '../../lib/pilotLifecycle';
+import { cleanEmail, cleanText, nullableMultilineText, nullableText } from '../../lib/inputSanitizers';
 
-const optionalText = z.string().optional().or(z.literal(''));
+const optionalText = z.string().max(500, 'Must be 500 characters or fewer').optional().or(z.literal(''));
 const PILOT_EMAIL_DOMAIN = 'dronesolutions.co.zw';
 
 const pilotSchema = z.object({
-  fullName: z.string().min(2, 'Full name must be at least 2 characters'),
+  fullName: z.string().trim().min(2, 'Full name must be at least 2 characters').max(120, 'Full name must be 120 characters or fewer'),
   email: z.string().email('Invalid email address').optional().or(z.literal('')),
   phone: optionalText,
   pilotCode: optionalText,
@@ -29,7 +30,7 @@ const pilotSchema = z.object({
   nextTrainingDate: optionalText,
   emergencyContactName: optionalText,
   emergencyContactPhone: optionalText,
-  pilotNotes: optionalText,
+  pilotNotes: z.string().max(2000, 'Notes must be 2000 characters or fewer').optional().or(z.literal('')),
   lastGroundedReason: optionalText,
   password: z.string().min(8, 'Password must be at least 8 characters').optional().or(z.literal('')),
   confirmPassword: optionalText,
@@ -79,11 +80,6 @@ const SectionTitle = ({ Icon, children }) => (
   </h3>
 );
 
-const toNullable = (value) => {
-  const trimmed = String(value || '').trim();
-  return trimmed ? trimmed : null;
-};
-
 const deriveReadiness = (status, readiness) => {
   if (status === 'Inactive') return 'Inactive';
   if (status === 'Suspended') return 'Grounded';
@@ -91,7 +87,7 @@ const deriveReadiness = (status, readiness) => {
 };
 
 const getPilotEmailFromName = (fullName) => {
-  const localPart = String(fullName || '')
+  const localPart = cleanText(fullName, { max: 120 })
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
@@ -187,27 +183,27 @@ const PilotFormPanel = ({ isOpen, onClose, pilot = null, onSave }) => {
   }, [isEditing, setValue, watchedFullName]);
 
   const buildProfilePayload = (data) => ({
-    full_name: data.fullName.trim(),
+    full_name: cleanText(data.fullName, { max: 120 }),
     role: 'pilot',
-    email: toNullable(data.email),
-    phone: toNullable(data.phone),
-    pilot_code: toNullable(data.pilotCode) || data.licenceNo,
-    base_location: toNullable(data.baseLocation),
-    licence_number: data.licenceNo.trim(),
+    email: cleanEmail(data.email) || null,
+    phone: nullableText(data.phone, { max: 40 }),
+    pilot_code: nullableText(data.pilotCode, { max: 80 }) || cleanText(data.licenceNo, { max: 80 }),
+    base_location: nullableText(data.baseLocation, { max: 160 }),
+    licence_number: cleanText(data.licenceNo, { max: 80 }),
     category: data.category,
     status: data.status,
     readiness_status: deriveReadiness(data.status, data.readinessStatus),
     licence_expiry: data.licenceExpiry,
     medical_expiry: data.medicalExpiry,
-    last_currency_check: toNullable(data.lastCurrencyCheck),
-    next_currency_check: toNullable(data.nextCurrencyCheck),
+    last_currency_check: nullableText(data.lastCurrencyCheck, { max: 20 }),
+    next_currency_check: nullableText(data.nextCurrencyCheck, { max: 20 }),
     minimum_currency_hours: data.minimumCurrencyHours ? Number(data.minimumCurrencyHours) : 2,
-    last_training_date: toNullable(data.lastTrainingDate),
-    next_training_date: toNullable(data.nextTrainingDate),
-    emergency_contact_name: toNullable(data.emergencyContactName),
-    emergency_contact_phone: toNullable(data.emergencyContactPhone),
-    pilot_notes: toNullable(data.pilotNotes),
-    last_grounded_reason: toNullable(data.lastGroundedReason),
+    last_training_date: nullableText(data.lastTrainingDate, { max: 20 }),
+    next_training_date: nullableText(data.nextTrainingDate, { max: 20 }),
+    emergency_contact_name: nullableText(data.emergencyContactName, { max: 120 }),
+    emergency_contact_phone: nullableText(data.emergencyContactPhone, { max: 40 }),
+    pilot_notes: nullableMultilineText(data.pilotNotes, { max: 2000 }),
+    last_grounded_reason: nullableText(data.lastGroundedReason, { max: 500 }),
   });
 
   const markInitialPasswordRequired = async (pilotId) => {
@@ -226,10 +222,11 @@ const PilotFormPanel = ({ isOpen, onClose, pilot = null, onSave }) => {
   const onSubmit = async (data) => {
     try {
       const generatedEmail = getPilotEmailFromName(data.fullName);
-      const generatedPassword = data.password || generateInitialPassword();
+      const generatedPassword = isEditing ? data.password : generateInitialPassword();
       const submission = {
         ...data,
-        email: isEditing ? data.email : generatedEmail,
+        fullName: cleanText(data.fullName, { max: 120 }),
+        email: isEditing ? cleanEmail(data.email) : generatedEmail,
         password: generatedPassword,
         confirmPassword: generatedPassword,
       };
@@ -287,7 +284,7 @@ const PilotFormPanel = ({ isOpen, onClose, pilot = null, onSave }) => {
         }
 
         setCreatedCredentials({
-          fullName: submission.fullName.trim(),
+          fullName: cleanText(submission.fullName, { max: 120 }),
           email: submission.email,
           password: submission.password,
         });
@@ -494,6 +491,7 @@ const PilotFormPanel = ({ isOpen, onClose, pilot = null, onSave }) => {
                 </div>
               </div>
             </section>
+
           </form>
         </div>
 
