@@ -7,7 +7,10 @@ import { createNotification } from '../../lib/notifications';
 import { ACTIVE_MISSION_STATUS } from '../../lib/missionStatus';
 import { formatDate, getDroneReadiness, isMaintenanceDue } from '../../lib/droneLifecycle';
 import { getDaysUntil, getPilotBlockReason, getPilotRestingReadiness } from '../../lib/pilotLifecycle';
+import { cleanEnum, cleanMultilineText, cleanText } from '../../lib/inputSanitizers';
 
+const MISSION_TYPES = ['Surveying', 'Inspection', 'Agricultural Spraying', 'Delivery', 'Media', 'Search & Rescue', 'Other'];
+const MISSION_STATUSES = ['Scheduled', ACTIVE_MISSION_STATUS, 'Completed', 'Cancelled'];
 
 const MissionFormModal = ({ isOpen, onClose, onSave, mission }) => {
   const { user } = useContext(AuthContext);
@@ -195,7 +198,11 @@ const MissionFormModal = ({ isOpen, onClose, onSave, mission }) => {
     setError('');
     setConflictError('');
 
-    if (!form.name || !form.pilot_id || !form.drone_id || !form.date || !form.location) {
+    const sanitizedName = cleanText(form.name, { max: 160 });
+    const sanitizedLocation = cleanText(form.location, { max: 180 });
+    const sanitizedNotes = cleanMultilineText(form.notes, { max: 2000 });
+
+    if (!sanitizedName || !form.pilot_id || !form.drone_id || !form.date || !sanitizedLocation) {
       setError('Please fill in all required fields.');
       return;
     }
@@ -222,18 +229,18 @@ const MissionFormModal = ({ isOpen, onClose, onSave, mission }) => {
 
     setIsSubmitting(true);
 
-    const missionName = form.name.trim();
+    const missionName = sanitizedName;
 
     const payload = {
       name: missionName,
       mission_identifier: missionName,
-      type: form.type,
+      type: cleanEnum(form.type, MISSION_TYPES, 'Other'),
       pilot_id: form.pilot_id,
       drone_id: form.drone_id,
       date: form.date,
-      location: form.location,
-      notes: form.notes,
-      status: isEditing ? form.status : 'Scheduled',
+      location: sanitizedLocation,
+      notes: sanitizedNotes,
+      status: isEditing ? cleanEnum(form.status, MISSION_STATUSES, 'Scheduled') : 'Scheduled',
     };
 
     if (isEditing) {
@@ -297,7 +304,7 @@ const MissionFormModal = ({ isOpen, onClose, onSave, mission }) => {
       await createNotification({
         recipientId: form.pilot_id,
         title: 'Mission assigned',
-        content: `You have been assigned to mission "${form.name}" on ${new Date(form.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}.`,
+        content: `You have been assigned to mission "${missionName}" on ${new Date(form.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}.`,
         missionId: savedMission?.id,
         droneId: form.drone_id,
         actorId: user?.id,
