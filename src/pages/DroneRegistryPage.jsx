@@ -7,14 +7,13 @@ import {
   Clock,
   Eye,
   Loader2,
-  MapPin,
   PlaneTakeoff,
   PlusCircle,
   Search,
-  ShieldCheck,
   Wrench,
 } from 'lucide-react';
 import StatusBadge from '../components/ui/StatusBadge';
+import PaginationControls from '../components/ui/PaginationControls';
 import DroneFormModal from '../components/drones/DroneFormModal';
 import { supabase } from '../lib/supabase';
 import {
@@ -23,7 +22,6 @@ import {
   getHoursSinceService,
   getReadinessStyles,
   getServiceProgress,
-  isDroneAssignable,
   isMaintenanceDue,
 } from '../lib/droneLifecycle';
 
@@ -37,6 +35,29 @@ const StatCard = ({ title, value, Icon, colorClass = 'text-text-primary' }) => (
   </div>
 );
 
+const PAGE_SIZE_DEFAULT = 25;
+
+const applyDroneSearch = (request, text) => {
+  const value = text.trim().replace(/,/g, ' ');
+  if (!value) return request;
+
+  return request.or([
+    `model.ilike.%${value}%`,
+    `serial_number.ilike.%${value}%`,
+    `registration_number.ilike.%${value}%`,
+    `manufacturer.ilike.%${value}%`,
+    `home_base.ilike.%${value}%`,
+  ].join(','));
+};
+
+const applyDroneFilter = (request, filter) => {
+  if (filter === 'ready') return request.eq('status', 'Operational').eq('readiness_status', 'Ready');
+  if (filter === 'assigned') return request.in('readiness_status', ['Assigned', 'In Mission']);
+  if (filter === 'maintenance') return request.or('readiness_status.eq.Needs Maintenance,status.eq.Maintenance');
+  if (filter === 'grounded') return request.in('status', ['Grounded', 'Decommissioned']);
+  return request;
+};
+
 const DroneRegistryPage = () => {
   const navigate = useNavigate();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -46,20 +67,29 @@ const DroneRegistryPage = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [query, setQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE_DEFAULT);
+  const [totalCount, setTotalCount] = useState(0);
+  const [stats, setStats] = useState({ total: 0, ready: 0, assigned: 0, maintenance: 0 });
 
   const fetchFleet = async () => {
     setIsLoading(true);
-    const [droneResponse, missionResponse, logResponse] = await Promise.all([
-      supabase.from('drones').select('*').order('created_at', { ascending: false }),
-      supabase
-        .from('missions')
-        .select('id, name, mission_identifier, date, status, drone_id')
-        .in('status', ['Scheduled', 'Active'])
-        .order('date', { ascending: true }),
-      supabase
-        .from('flight_logs')
-        .select('id, drone_id, log_date, duration_minutes, incident_reported')
-        .order('log_date', { ascending: false }),
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    let droneRequest = supabase
+      .from('drones')
+      .select('*', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(from, to);
+
+    droneRequest = applyDroneFilter(applyDroneSearch(droneRequest, query), activeFilter);
+
+    const [droneResponse, totalResponse, readyResponse, assignedResponse, maintenanceResponse] = await Promise.all([
+      droneRequest,
+      supabase.from('drones').select('id', { count: 'exact', head: true }),
+      supabase.from('drones').select('id', { count: 'exact', head: true }).eq('status', 'Operational').eq('readiness_status', 'Ready'),
+      supabase.from('drones').select('id', { count: 'exact', head: true }).in('readiness_status', ['Assigned', 'In Mission']),
+      supabase.from('drones').select('id', { count: 'exact', head: true }).or('readiness_status.eq.Needs Maintenance,status.eq.Maintenance'),
     ]);
 
     if (droneResponse.error) {
@@ -67,7 +97,37 @@ const DroneRegistryPage = () => {
       setDrones([]);
     } else {
       setDrones(droneResponse.data || []);
+      setTotalCount(droneResponse.count || 0);
     }
+
+    setStats({
+      total: totalResponse.count || 0,
+      ready: readyResponse.count || 0,
+      assigned: assignedResponse.count || 0,
+      maintenance: maintenanceResponse.count || 0,
+    });
+
+    const droneIds = (droneResponse.data || []).map((drone) => drone.id);
+    if (droneIds.length === 0) {
+      setMissions([]);
+      setFlightLogs([]);
+      setIsLoading(false);
+      return;
+    }
+
+    const [missionResponse, logResponse] = await Promise.all([
+      supabase
+        .from('missions')
+        .select('id, name, mission_identifier, date, status, drone_id')
+        .in('drone_id', droneIds)
+        .in('status', ['Scheduled', 'Active'])
+        .order('date', { ascending: true }),
+      supabase
+        .from('flight_logs')
+        .select('id, drone_id, log_date, duration_minutes, incident_reported')
+        .in('drone_id', droneIds)
+        .order('log_date', { ascending: false }),
+    ]);
 
     if (!missionResponse.error) setMissions(missionResponse.data || []);
     if (!logResponse.error) setFlightLogs(logResponse.data || []);
@@ -76,7 +136,7 @@ const DroneRegistryPage = () => {
 
   useEffect(() => {
     fetchFleet();
-  }, []);
+  }, [activeFilter, page, pageSize, query]);
 
   const latestLogByDrone = useMemo(() => {
     const map = new Map();
@@ -114,35 +174,6 @@ const DroneRegistryPage = () => {
     })
   ), [activeMissionByDrone, drones, latestLogByDrone]);
 
-  const stats = useMemo(() => ({
-    total: drones.length,
-    ready: enrichedDrones.filter((drone) => drone.readiness === 'Ready' && isDroneAssignable(drone)).length,
-    assigned: enrichedDrones.filter((drone) => ['Assigned', 'In Mission'].includes(drone.readiness)).length,
-    maintenance: enrichedDrones.filter((drone) => drone.readiness === 'Needs Maintenance').length,
-  }), [drones.length, enrichedDrones]);
-
-  const filteredDrones = useMemo(() => {
-    const text = query.trim().toLowerCase();
-
-    return enrichedDrones.filter((drone) => {
-      if (activeFilter !== 'all') {
-        if (activeFilter === 'ready' && !(drone.readiness === 'Ready' && isDroneAssignable(drone))) return false;
-        if (activeFilter === 'assigned' && !['Assigned', 'In Mission'].includes(drone.readiness)) return false;
-        if (activeFilter === 'maintenance' && drone.readiness !== 'Needs Maintenance') return false;
-        if (activeFilter === 'grounded' && !['Grounded', 'Decommissioned'].includes(drone.readiness)) return false;
-      }
-
-      if (!text) return true;
-      return [
-        drone.model,
-        drone.serial_number,
-        drone.registration_number,
-        drone.manufacturer,
-        drone.home_base,
-      ].some((value) => (value || '').toLowerCase().includes(text));
-    });
-  }, [activeFilter, enrichedDrones, query]);
-
   return (
     <div className="space-y-6 min-w-0 pb-6">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
@@ -173,7 +204,10 @@ const DroneRegistryPage = () => {
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
             <input
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setPage(1);
+              }}
               placeholder="Search model, registration, serial, base..."
               className="input-field h-10 pl-9 text-sm"
             />
@@ -188,7 +222,10 @@ const DroneRegistryPage = () => {
             ].map(([id, label]) => (
               <button
                 key={id}
-                onClick={() => setActiveFilter(id)}
+                onClick={() => {
+                  setActiveFilter(id);
+                  setPage(1);
+                }}
                 className={`shrink-0 rounded border px-3 py-2 text-xs font-semibold uppercase tracking-wide transition-colors ${
                   activeFilter === id
                     ? 'border-accent/30 bg-accent/10 text-accent'
@@ -207,103 +244,99 @@ const DroneRegistryPage = () => {
           <Loader2 className="mb-2 animate-spin" size={24} />
           Loading fleet...
         </div>
-      ) : filteredDrones.length === 0 ? (
+      ) : enrichedDrones.length === 0 ? (
         <div className="card flex h-56 flex-col items-center justify-center text-center text-text-muted">
           <PlaneTakeoff className="mb-3 opacity-50" size={34} />
           <p className="font-semibold text-text-secondary">No drones match this view.</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          {filteredDrones.map((drone) => {
-            const mission = drone.activeMission;
-            const latestLog = drone.latestLog;
-            const readinessClass = getReadinessStyles(drone.readiness);
+        <div className="card overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[920px] table-fixed text-left text-sm">
+              <thead className="border-b border-border bg-bg-elevated/50 text-xs uppercase tracking-wide text-text-muted">
+                <tr>
+                  <th className="w-[20%] px-4 py-3 font-semibold">Drone</th>
+                  <th className="w-[10%] px-4 py-3 font-semibold">Status</th>
+                  <th className="w-[12%] px-4 py-3 font-semibold">Readiness</th>
+                  <th className="w-[11%] px-4 py-3 font-semibold">Base</th>
+                  <th className="w-[9%] px-4 py-3 font-semibold">Hours</th>
+                  <th className="w-[10%] px-4 py-3 font-semibold">Service</th>
+                  <th className="w-[10%] px-4 py-3 font-semibold">Next Service</th>
+                  <th className="w-[8%] px-4 py-3 font-semibold">Assignment</th>
+                  <th className="w-[10%] px-4 py-3 text-right font-semibold">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/50">
+                {enrichedDrones.map((drone, index) => {
+                  const mission = drone.activeMission;
+                  const readinessClass = getReadinessStyles(drone.readiness);
+                  const assignment = mission
+                    ? `${mission.name || mission.mission_identifier} (${formatDate(mission.date)})`
+                    : 'Available';
 
-            return (
-              <article key={drone.id} className="card min-w-0 overflow-hidden p-5">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-data text-xs uppercase tracking-wide text-text-muted">
-                        {drone.registration_number || drone.serial_number}
-                      </span>
-                      <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${readinessClass}`}>
-                        {drone.readiness}
-                      </span>
-                    </div>
-                    <h3 className="mt-2 truncate font-heading text-xl font-bold uppercase tracking-wide text-text-primary">
-                      {drone.model}
-                    </h3>
-                    <p className="mt-1 flex items-center gap-1.5 text-sm text-text-muted">
-                      <MapPin size={14} />
-                      {drone.home_base || 'No base assigned'}
-                    </p>
-                  </div>
-                  <StatusBadge status={drone.status} />
-                </div>
-
-                <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-3">
-                  <div className="rounded border border-border bg-bg-primary p-3">
-                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
-                      <Clock size={14} />
-                      Flight Hours
-                    </div>
-                    <div className="mt-2 font-data text-2xl font-bold text-accent">{drone.flight_hours || 0}</div>
-                  </div>
-                  <div className="rounded border border-border bg-bg-primary p-3">
-                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
-                      <Wrench size={14} />
-                      Service Used
-                    </div>
-                    <div className="mt-2 flex items-end gap-2">
-                      <span className="font-data text-2xl font-bold text-text-primary">{drone.serviceProgress}%</span>
-                      {drone.maintenanceDue && <AlertTriangle size={18} className="mb-1 text-status-warning" />}
-                    </div>
-                  </div>
-                  <div className="rounded border border-border bg-bg-primary p-3">
-                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-text-muted">
-                      <Calendar size={14} />
-                      Next Service
-                    </div>
-                    <div className="mt-2 text-sm font-semibold text-text-primary">{formatDate(drone.next_maintenance_date)}</div>
-                  </div>
-                </div>
-
-                <div className="mt-4 grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
-                  <div className="rounded border border-border/70 bg-bg-elevated/30 p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-text-muted">Current Assignment</div>
-                    <div className="mt-1 text-text-primary">
-                      {mission ? `${mission.name || mission.mission_identifier} (${formatDate(mission.date)})` : 'Available for scheduling'}
-                    </div>
-                  </div>
-                  <div className="rounded border border-border/70 bg-bg-elevated/30 p-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-text-muted">Last Flight</div>
-                    <div className="mt-1 text-text-primary">
-                      {latestLog ? `${formatDate(latestLog.log_date)} - ${latestLog.duration_minutes || 0} min` : 'No flight log yet'}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-4 flex flex-col gap-2 border-t border-border pt-4 sm:flex-row">
-                  <button
-                    onClick={() => navigate(`/drones/${drone.id}`)}
-                    className="inline-flex flex-1 items-center justify-center gap-2 rounded border border-accent/30 px-3 py-2 text-sm font-semibold uppercase tracking-wide text-accent transition-colors hover:bg-accent/10"
-                  >
-                    <Eye size={16} />
-                    View Details
-                  </button>
-                  <button
-                    onClick={() => navigate(`/drones/${drone.id}`)}
-                    className="inline-flex flex-1 items-center justify-center gap-2 rounded border border-border px-3 py-2 text-sm font-semibold uppercase tracking-wide text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary"
-                  >
-                    {drone.maintenanceDue ? <AlertTriangle size={16} /> : <ShieldCheck size={16} />}
-                    {drone.maintenanceDue ? 'Service Due' : 'Maintenance'}
-                  </button>
-                </div>
-              </article>
-            );
-          })}
+                  return (
+                    <tr key={drone.id} className={`transition-colors hover:bg-bg-elevated/40 ${index % 2 !== 0 ? 'bg-bg-elevated/10' : ''}`}>
+                      <td className="px-4 py-4">
+                        <div className="truncate font-semibold text-text-primary">{drone.model || 'Unnamed Drone'}</div>
+                        <div className="truncate font-data text-xs text-text-muted">{drone.registration_number || drone.serial_number || 'No registration'}</div>
+                      </td>
+                      <td className="px-4 py-4"><StatusBadge status={drone.status} /></td>
+                      <td className="px-4 py-4">
+                        <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${readinessClass}`}>
+                          {drone.readiness}
+                        </span>
+                      </td>
+                      <td className="truncate px-4 py-4 text-text-secondary">{drone.home_base || '-'}</td>
+                      <td className="whitespace-nowrap px-4 py-4 font-data text-accent">{Number(drone.flight_hours || 0).toFixed(1)} h</td>
+                      <td className="px-4 py-4">
+                        <div className="flex items-center gap-2">
+                          <span className="font-data text-text-secondary">{drone.serviceProgress}%</span>
+                          {drone.maintenanceDue && <AlertTriangle size={16} className="text-status-warning" />}
+                        </div>
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-4 font-data text-text-secondary">{formatDate(drone.next_maintenance_date)}</td>
+                      <td className="truncate px-4 py-4 text-text-secondary">{assignment}</td>
+                      <td className="px-4 py-4">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => navigate(`/drones/${drone.id}`)}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded border border-accent/30 text-accent transition-colors hover:bg-accent/10"
+                            title="View drone"
+                            aria-label={`View ${drone.model || 'drone'}`}
+                          >
+                            <Eye size={15} />
+                          </button>
+                          <button
+                            onClick={() => navigate(`/drones/${drone.id}`)}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded border border-border text-text-muted transition-colors hover:bg-bg-elevated hover:text-text-primary"
+                            title="Service drone"
+                            aria-label={`Service ${drone.model || 'drone'}`}
+                          >
+                            <Wrench size={15} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
+      )}
+
+      {!isLoading && (
+        <PaginationControls
+          page={page}
+          pageSize={pageSize}
+          totalCount={totalCount}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => {
+            setPageSize(size);
+            setPage(1);
+          }}
+          itemLabel="drones"
+        />
       )}
 
       <DroneFormModal
