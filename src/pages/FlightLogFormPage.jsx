@@ -7,6 +7,7 @@ import { createNotification } from '../lib/notifications';
 import { ACTIVE_MISSION_STATUS } from '../lib/missionStatus';
 import { isMaintenanceDue } from '../lib/droneLifecycle';
 import { getPilotRestingReadiness } from '../lib/pilotLifecycle';
+import { cleanMultilineText, cleanText, finiteNumber, nullableText } from '../lib/inputSanitizers';
 
 const LabeledField = ({ label, required, children }) => (
   <div className="space-y-2">
@@ -122,19 +123,31 @@ const FlightLogFormPage = () => {
       setError('Only pilots can submit flight logs.');
       return;
     }
-    if (!form.mission_id || !form.drone_id || !form.departure_location || !form.duration_minutes || !form.max_altitude_meters || !form.log_date) {
+    const durationMinutes = finiteNumber(form.duration_minutes);
+    const maxAltitudeMeters = finiteNumber(form.max_altitude_meters);
+    const distanceCoveredKm = finiteNumber(form.distance_covered_km);
+    const departureLocation = cleanText(form.departure_location, { max: 180 });
+    const landingLocation = nullableText(form.landing_location, { max: 180 });
+    const incidentDetails = cleanMultilineText(form.incident_details, { max: 2000 });
+    const weatherCondition = cleanText(form.weather_conditions, { max: 80 });
+
+    if (!form.mission_id || !form.drone_id || !departureLocation || durationMinutes === null || maxAltitudeMeters === null || !form.log_date) {
       setError('Please fill in all required fields.');
       return;
     }
-    if (parseInt(form.duration_minutes) < 1) {
+    if (durationMinutes < 1 || durationMinutes > 1440) {
       setError('Flight duration must be at least 1 minute.');
       return;
     }
-    if (parseFloat(form.max_altitude_meters) < 1) {
+    if (maxAltitudeMeters < 1 || maxAltitudeMeters > 10000) {
       setError('Maximum altitude must be at least 1 meter.');
       return;
     }
-    if (form.incident_reported && !form.incident_details.trim()) {
+    if (distanceCoveredKm !== null && (distanceCoveredKm < 0 || distanceCoveredKm > 100000)) {
+      setError('Distance covered must be a valid positive value.');
+      return;
+    }
+    if (form.incident_reported && !incidentDetails) {
       setError('Please describe the incident in the incident details field.');
       return;
     }
@@ -152,14 +165,14 @@ const FlightLogFormPage = () => {
         drone_id: form.drone_id,
         mission_type: selectedMission?.type || form.mission_type,
         log_date: form.log_date,
-        max_altitude_meters: parseFloat(form.max_altitude_meters),
-        distance_covered_km: form.distance_covered_km ? parseFloat(form.distance_covered_km) : null,
-        departure_location: form.departure_location,
-        landing_location: form.landing_location || null,
-        duration_minutes: parseInt(form.duration_minutes),
-        weather_conditions: { condition: form.weather_conditions },
+        max_altitude_meters: maxAltitudeMeters,
+        distance_covered_km: distanceCoveredKm,
+        departure_location: departureLocation,
+        landing_location: landingLocation,
+        duration_minutes: Math.round(durationMinutes),
+        weather_conditions: { condition: weatherCondition },
         incident_reported: form.incident_reported,
-        incident_details: form.incident_reported ? form.incident_details : null,
+        incident_details: form.incident_reported ? incidentDetails : null,
         review_status: 'pending',
       })
       .select()
@@ -179,7 +192,7 @@ const FlightLogFormPage = () => {
       .single();
 
     if (pilot) {
-      const newHours = (parseFloat(pilot.total_flight_hours) || 0) + (parseInt(form.duration_minutes) / 60);
+      const newHours = (parseFloat(pilot.total_flight_hours) || 0) + (durationMinutes / 60);
       const updatedPilot = {
         ...pilot,
         total_flight_hours: parseFloat(newHours.toFixed(2)),
@@ -210,7 +223,7 @@ const FlightLogFormPage = () => {
       .single();
 
     if (drone) {
-      const newDroneHours = (parseFloat(drone.flight_hours) || 0) + (parseInt(form.duration_minutes) / 60);
+      const newDroneHours = (parseFloat(drone.flight_hours) || 0) + (durationMinutes / 60);
       const updatedDrone = { ...drone, flight_hours: parseFloat(newDroneHours.toFixed(2)) };
       const serviceDue = isMaintenanceDue(updatedDrone);
       await supabase
@@ -234,7 +247,7 @@ const FlightLogFormPage = () => {
           recipientId: selectedMission.created_by,
           title: form.incident_reported ? 'Incident reported' : 'Flight log submitted',
           content: form.incident_reported
-            ? `${user.fullName || user.email || 'A pilot'} reported an incident on "${selectedMission.name || selectedMission.mission_identifier}": ${form.incident_details.trim()}`
+            ? `${user.fullName || user.email || 'A pilot'} reported an incident on "${selectedMission.name || selectedMission.mission_identifier}": ${incidentDetails}`
             : `${user.fullName || user.email || 'A pilot'} submitted a flight log for "${selectedMission.name || selectedMission.mission_identifier}".`,
           missionId: form.mission_id,
           flightLogId: newLog.id,
