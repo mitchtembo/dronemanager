@@ -9,6 +9,7 @@ import DatePicker from 'react-datepicker';
 import "react-datepicker/dist/react-datepicker.css";
 import { supabase } from '../lib/supabase';
 import { AuthContext } from '../context/AuthContext';
+import { cleanMultilineText } from '../lib/inputSanitizers';
 
 const logSchema = z.object({
   date: z.date({
@@ -21,9 +22,9 @@ const logSchema = z.object({
   maxAltitude: z.number().min(0, "Altitude must be non-negative").max(500),
   temperature: z.number().min(-50).max(60),
   windSpeed: z.number().min(0).max(50),
-  visibility: z.string().min(1, "Visibility is required"),
+  visibility: z.string().trim().min(1, "Visibility is required").max(80),
   incidentReported: z.boolean(),
-  notes: z.string().optional(),
+  notes: z.string().max(2000).optional(),
 });
 
 const NewFlightLogPage = () => {
@@ -184,7 +185,7 @@ const NewFlightLogPage = () => {
         mission_id: data.missionId || null,
         duration_minutes: data.duration,
         incident_reported: data.incidentReported,
-        incident_details: data.notes || null,
+        incident_details: cleanMultilineText(data.notes, { max: 2000 }) || null,
       };
 
       const { error } = await supabase.from('flight_logs').insert([payload]);
@@ -357,7 +358,7 @@ const NewFlightLogPage = () => {
                 {/* Temperature */}
                 <div>
                   <label className="flex items-center gap-1 font-sans text-xs text-text-secondary mb-1">
-                    <Thermometer size={14} /> Temp (°C)
+                    <Thermometer size={14} /> Temp (Â°C)
                   </label>
                   <input 
                     type="number"
